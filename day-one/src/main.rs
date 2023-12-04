@@ -78,7 +78,7 @@ fn calibration_value_p2(line: &str, trie: &PrefixTrie<char>) -> usize {
                 continue;
             }
 
-            if let Some((digit, n_chars)) =
+            if let Some((digit, _n_chars)) =
                 trie.lookup_prefix(vec![c].into_iter().chain(chars.clone()))
             {
                 vec.push(digit);
@@ -107,7 +107,6 @@ fn calibration_value_p2(line: &str, trie: &PrefixTrie<char>) -> usize {
     return format!("{first}{last}").parse().expect("valid number");
 }
 
-#[derive(Debug)]
 struct PrefixTrie<T: Copy + Debug> {
     root: HashMap<char, Box<Leaf<T>>>,
 }
@@ -166,7 +165,7 @@ impl<T: Copy + Debug> PrefixTrie<T> {
         };
     }
 
-    // `key` is a string that starts with a prefix and may contain additional
+    // `key_chars` is an iterator that starts with a prefix and may contain additional
     // characters after that prefix. If the prefix is found, the corresponding
     // value and the number of characters the prefix contains are returned.
     // If the prefix isn't found, `None` is returned instead.
@@ -175,8 +174,8 @@ impl<T: Copy + Debug> PrefixTrie<T> {
         for (i, c) in key_chars.enumerate() {
             match m.get(&c) {
                 Some(leaf) => match **leaf {
-                    Leaf::Link(ref link) => {
-                        *m = link;
+                    Leaf::Link(ref links) => {
+                        *m = links;
                     }
                     Leaf::Value(value) => {
                         return Some((value, i + 1));
@@ -192,5 +191,32 @@ impl<T: Copy + Debug> PrefixTrie<T> {
         // we ran out of key characters while traversing the tree,
         // meaning the key is a partial match for at least one value
         return None;
+    }
+}
+
+impl<T: Copy + Debug> Debug for PrefixTrie<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt_links<A: Copy + Debug>(
+            f: &mut std::fmt::Formatter<'_>,
+            links: &HashMap<char, Box<Leaf<A>>>,
+            prefix: &str,
+        ) -> std::fmt::Result {
+            let mut links = links.iter().collect::<Vec<_>>();
+            links.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
+            for (c, leaf) in links {
+                match **leaf {
+                    Leaf::Link(ref links) => fmt_links(f, links, &format!("{prefix}{c}"))?,
+                    Leaf::Value(ref value) => writeln!(f, "{prefix}{c} => {value:?},")?,
+                }
+            }
+
+            Ok(())
+        }
+
+        writeln!(f, "PrefixTrie {{")?;
+        fmt_links(f, &self.root, "  ")?;
+        writeln!(f, "}}")?;
+
+        Ok(())
     }
 }
