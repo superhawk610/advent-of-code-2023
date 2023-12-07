@@ -1,6 +1,8 @@
+use std::collections::HashSet;
+
 fn main() {
-    part_one();
-    // part_two();
+    // part_one();
+    part_two();
 }
 
 #[allow(unused)]
@@ -32,7 +34,33 @@ fn part_one() {
 }
 
 #[allow(unused)]
-fn part_two() {}
+fn part_two() {
+    // let input = "
+    // 467..114..
+    // ...*......
+    // ..35..633.
+    // ......#...
+    // 617*......
+    // .....+.58.
+    // ..592.....
+    // ......755.
+    // ...$.*....
+    // .664.598..";
+
+    let input = include_str!("./input.txt");
+
+    let rows = input
+        .split("\n")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .enumerate()
+        .map(parse_line)
+        .collect::<Vec<Vec<Segment>>>();
+
+    let grid = Grid { rows };
+    let gear_ratio_sum = grid.gears().sum::<usize>();
+    println!("{gear_ratio_sum}");
+}
 
 fn parse_line((row, line): (usize, &str)) -> Vec<Segment> {
     let mut chars = line
@@ -77,30 +105,36 @@ fn parse_line((row, line): (usize, &str)) -> Vec<Segment> {
                     start: pos,
                     len: s.len(),
                 };
-                let segment = Segment::PartNumber {
+                let segment = Segment::Part {
                     bounds,
                     number: s.parse::<usize>().expect("valid part number"),
                 };
                 segments.push(segment);
             }
             c => {
-                let mut s = String::with_capacity(chars.len());
-                s.push(c);
-                while let Some((_, c)) = chars.peek() {
-                    if c.is_digit(10) || *c == '.' {
-                        break;
-                    }
+                // For part one, we created a single segment for any length run
+                // of symbols; for part two, however, multiple gears (`*`) may
+                // be adjacent to each other, but should still be counted
+                // separately, so we'll instead always create separate Symbol
+                // segments for each character.
+                //
+                // let mut s = String::with_capacity(chars.len());
+                // s.push(c);
+                // while let Some((_, c)) = chars.peek() {
+                //     if c.is_digit(10) || *c == '.' {
+                //         break;
+                //     }
 
-                    s.push(*c);
-                    let _ = chars.next();
-                }
+                //     s.push(*c);
+                //     let _ = chars.next();
+                // }
 
                 let bounds = Bounds {
                     row,
                     start: pos,
-                    len: s.len(),
+                    len: 1,
                 };
-                let segment = Segment::Symbol { bounds, tokens: s };
+                let segment = Segment::Symbol { bounds, token: c };
                 segments.push(segment);
             }
         }
@@ -109,7 +143,7 @@ fn parse_line((row, line): (usize, &str)) -> Vec<Segment> {
     segments
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 struct Bounds {
     row: usize,
     start: usize,
@@ -136,33 +170,36 @@ impl Bounds {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 enum Segment {
-    Vacant {
-        bounds: Bounds,
-    },
-    PartNumber {
-        bounds: Bounds,
-        number: usize,
-    },
-    Symbol {
-        bounds: Bounds,
-        #[allow(unused)]
-        tokens: String,
-    },
+    Vacant { bounds: Bounds },
+    Part { bounds: Bounds, number: usize },
+    Symbol { bounds: Bounds, token: char },
 }
 
 impl Segment {
     pub fn bounds(&self) -> &Bounds {
         match self {
             Segment::Vacant { bounds } => bounds,
-            Segment::PartNumber { bounds, .. } => bounds,
+            Segment::Part { bounds, .. } => bounds,
             Segment::Symbol { bounds, .. } => bounds,
+        }
+    }
+
+    pub fn part_number(&self) -> usize {
+        if let Self::Part { number, .. } = self {
+            *number
+        } else {
+            panic!("attempted to read part number on non-part segment")
         }
     }
 
     pub fn is_symbol(&self) -> bool {
         matches!(self, Self::Symbol { .. })
+    }
+
+    pub fn is_part(&self) -> bool {
+        matches!(self, Self::Part { .. })
     }
 }
 
@@ -172,10 +209,46 @@ struct Grid {
 }
 
 impl Grid {
+    // Returns the gear ratios of all valid gear segments.
+    pub fn gears(&self) -> impl Iterator<Item = usize> + '_ {
+        self.rows.iter().flat_map(|row| {
+            row.iter().filter_map(|segment| match segment {
+                Segment::Symbol { bounds, token: '*' } => {
+                    let mut adjacent_parts = HashSet::with_capacity(2);
+                    for (row, col) in bounds.adjacent_coords() {
+                        if let Some(segment) = self.lookup(row, col) {
+                            if segment.is_part() && !adjacent_parts.contains(segment) {
+                                if adjacent_parts.len() == 2 {
+                                    // gear is adjacent to too many parts
+                                    return None;
+                                }
+                                adjacent_parts.insert(segment);
+                            }
+                        }
+                    }
+
+                    if adjacent_parts.len() == 2 {
+                        Some(
+                            adjacent_parts
+                                .iter()
+                                .map(|s| s.part_number())
+                                .product::<usize>(),
+                        )
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+        })
+    }
+
+    // Returns the part number for all valid Part segments (adjacent
+    // to one or more Symbol segments, including diagonally).
     pub fn part_numbers(&self) -> impl Iterator<Item = usize> + '_ {
         self.rows.iter().flat_map(|row| {
             row.iter().filter_map(|segment| match segment {
-                Segment::PartNumber { bounds, number } => {
+                Segment::Part { bounds, number } => {
                     if bounds.adjacent_coords().any(|(row, col)| {
                         self.lookup(row, col)
                             .map(|s| s.is_symbol())
